@@ -1,0 +1,3 @@
+$a $b (match "hi") (match_jmp)
+$b $c (true) (latch_num_bin r1 #2)
+$d $e (r8 < #4) (jmp r4)
