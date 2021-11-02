@@ -11,24 +11,26 @@ def getNum(state, arg):
 		return None
 
 # action functions: State -> Args -> State
-def nop(state, noArg):
+def nop(state):
 	return state
 
 #offset can be a reg or an immediate
 def jmp(state, offset):
-	offsetNum = getNum(state, offest)
+	offsetNum = getNum(state, offset)
 	state.readIdx += offsetNum
 	return state
 
 def latch_num_ascii(state, destReg):
-	state.regs[int(destReg[1:])] = int(re.search("(\d+)", state.bytestream[state.readIdx:])
+	state.regs[int(destReg[1:])] = int(re.search("(\d+)", state.bytestream[state.readIdx:]).group(1))
+	state.readIdx += state.regs[int(destReg[1:])]
 	return state
 
 #numBytes can be a reg or an immediate
-def latch_num_bin(state, (destReg, numBytes)):
+def latch_num_bin(state, destReg, numBytes):
 	reg = int(destReg[1:])
-	bytes = getNum(state, numBytes)
-	int.from_byte(state.bytestream[state.readIdx:state.readIdx+bytes], "big")
+	bts = getNum(state, numBytes)
+	state.regs[reg] = int.from_bytes(state.bytestream[state.readIdx:state.readIdx+bts].encode(), "big")
+	state.readIdx += bts
 	return state
 
 def call(state, subgraph):
@@ -42,7 +44,7 @@ def match_jmp(state):
 	return state
 
 #op1 and op2 may be immediates or registers
-def add_sub(state, (op, destReg, op1, op2)):
+def add_sub(state, op, destReg, op1, op2):
 	op1Num = getNum(state, op1)
 	op2Num = getNum(state, op2)
 	reg = int(destReg[1:])
@@ -55,9 +57,15 @@ def add_sub(state, (op, destReg, op1, op2)):
 
 # condition functions: State -> Args -> bool
 def match(state, string):
-	return false
+	string = string.replace("\\r", "\r")
+	string = string.replace("\\n", "\n")
+	string = string[1:len(string)-1]
+	print("checking for: " + string.replace("\r", "\\r").replace("\n", "\\n") + " " + str(state.readIdx) + " " + str(state.readIdx + len(string)))
+	print(state.bytestream[state.readIdx:state.readIdx+len(string)].replace("\r", "\\r").replace("\n", "\\n"))
+	state.matchLength = len(string)
+	return state.bytestream[state.readIdx:state.readIdx+len(string)] == string
 
-def comp(state, (type, compReg, immediate)):
+def comp(state, type, compReg, immediate):
 	num1 = getNum(state, compReg)
 	num2 = getNum(state, immediate)
 	if type == 0:
@@ -66,10 +74,10 @@ def comp(state, (type, compReg, immediate)):
 		return num2 > num1
 	elif type == 2:
 		return num1 == num2
-	return false
+	return False
 
 def trueCond(state, arg):
-	return true
+	return True
 
 
 class State():
@@ -79,15 +87,28 @@ class State():
 		# a real compiler could map these to integer value states (e.g. main = 0, ...), but python makes it easy to do this
 		self.currState = 'main'
 		self.readIdx = 0
-		self.bytestream = ""
-		self.matchLength = 0
+		with open ("dnsHeader.test", "r") as myfile:
+			self.bytestream = myfile.read()
+		self.matchLength = 1
 
 class Node():
 	def __init__(self, name):
 		self.transitions = []
+		self.name = name
 
 	def addTransition(self, dest, condFunc, condArgs, actFunc, actArgs):
 		self.transitions.append((dest, condFunc, condArgs, actFunc, actArgs))
+
+	def drive(self, state):
+		print(self.name)
+		for (dest, condFunc, condArgs, actFunc, actArgs) in self.transitions:
+			if condFunc(state, *condArgs):
+				return (dest, actFunc(state, *actArgs))
+		state.readIdx += 1
+		return (self, state)
+	
+	def getName(self):
+		return self.name
 
 #TODO: subgraph parsing
 def parse(program):
@@ -98,12 +119,12 @@ def parse(program):
 		#each line is one transition - each for loop iteration builds one transition
 		lineArr = line.split(' ')
 		# construct the node if not seen before
-		if line[0] not in nodeMap:
-			nodeMap[line[0]] = Node(line[0])
-		if line[1] not in nodeMap:
-			nodeMap[line[1]] = Node(line[1])
-		node = nodeMap[line[0]]
-		dest = nodeMap[line[1]]
+		if lineArr[0] not in nodeMap:
+			nodeMap[lineArr[0]] = Node(lineArr[0])
+		if lineArr[1] not in nodeMap:
+			nodeMap[lineArr[1]] = Node(lineArr[1])
+		node = nodeMap[lineArr[0]]
+		dest = nodeMap[lineArr[1]]
 		#begin construction transition
 		paren = re.findall('\(([^)]+)', line)
 		condStr = paren[0]
@@ -116,10 +137,10 @@ def parse(program):
 		op = None
 		if(condArr[0] == 'match'):
 			condFunc = match
-			condArgs = (condArr[1])
+			condArgs = (condArr[1],)
 		elif condArr[0] == 'true':
 			condFunc = trueCond
-			condArgs = None
+			condArgs = (None,)
 		else:
 			condFunc = comp
 			if condArr[1] == '<':
@@ -139,10 +160,29 @@ def parse(program):
 		print(str(actFunc) + " " + str(actArgs))
 
 		node.addTransition(dest, condFunc, condArgs, actFunc, actArgs)
+	print(nodeMap)
+	return nodeMap
 
 
+nodeMap = parse("dns_header.porc")
+node = nodeMap['$main']
+state = State()
+prevIdx = 0
+sizes = []
+while state.readIdx < len(state.bytestream):
+	print((state.readIdx, len(state.bytestream)))
+	(node, state) = node.drive(state)
+	if node.getName() == '$end':
+		#implicit transition
+		node = nodeMap['$main']
+		sizes.append(state.readIdx - prevIdx)
+		prevIdx = state.readIdx
+if node.getName() == '$end':
+		#implicit transition
+		node = nodeMap['$main']
+		sizes.append(state.readIdx - prevIdx)
+		prevIdx = state.readIdx
 
-
-
-
-parse("test.porc")
+print(state.readIdx)
+print(state.regs)
+print(sizes)

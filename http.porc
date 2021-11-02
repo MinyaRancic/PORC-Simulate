@@ -1,0 +1,7 @@
+$main $chunked (match "transfer_encoding: chunked") (match_jmp)
+$main $has_body (match "content_length: ") (match_jmp)
+$has_body $body_stored (true) (latch_num_ascii r1)
+$body_stored $tmp (match "\n") (match_jmp)
+$tmp $end (true) (jmp r1)
+$chunked $end (match "0\n") (match_jmp)
+$main $end (match "\n") (match_jmp)

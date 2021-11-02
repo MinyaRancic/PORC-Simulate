@@ -1,0 +1,5 @@
+$main $QA (true) (jmp #4)
+$QA $AN (true) (latch_num_bin r1 #2)
+$AN $NS (true) (latch_num_bin r2 #2)
+$NS $AR (true) (latch_num_bin r3 #2)
+$AR $end (true) (latch_num_bin r4 #2)
